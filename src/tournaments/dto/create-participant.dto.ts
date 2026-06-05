@@ -1,9 +1,16 @@
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { Gender } from '../../common/enums';
 
 export class CreateParticipantDto {
   @IsString()
   @MinLength(2)
+  @MaxLength(80)
   name: string;
 
   @IsOptional()

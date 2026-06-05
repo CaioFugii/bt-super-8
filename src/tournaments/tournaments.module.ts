@@ -6,6 +6,7 @@ import {
   RevokedPublicToken,
   Tournament,
   TournamentChallenge,
+  TournamentStatusAudit,
 } from '../entities';
 import { TournamentsController } from './tournaments.controller';
 import { PublicTournamentsController } from './public-tournaments.controller';
@@ -21,6 +22,7 @@ import { RankingService } from './ranking.service';
       Match,
       TournamentChallenge,
       RevokedPublicToken,
+      TournamentStatusAudit,
     ]),
   ],
   controllers: [TournamentsController, PublicTournamentsController],

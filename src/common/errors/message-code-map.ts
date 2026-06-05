@@ -28,6 +28,17 @@ const EXACT_MAP: Record<string, { code: string; message?: string }> = {
     code: ErrorCodes.INVALID_MIXED_GENDER_DISTRIBUTION,
     message: 'O Super 8 Misto exige exatamente 4 homens e 4 mulheres.',
   },
+  'Já existe um participante com este nome.': {
+    code: ErrorCodes.DUPLICATED_PARTICIPANT,
+  },
+  'A data do torneio não pode estar no passado.': {
+    code: ErrorCodes.TOURNAMENT_DATE_IN_PAST,
+  },
+  'Todas as partidas devem estar finalizadas ou com W.O. antes de encerrar o torneio.': {
+    code: ErrorCodes.TOURNAMENT_CANNOT_BE_FINISHED,
+    message:
+      'Todas as partidas devem estar finalizadas ou com W.O. antes de encerrar o torneio.',
+  },
   'O placar não pode terminar em empate': {
     code: ErrorCodes.INVALID_SCORE,
     message: 'Informe um placar válido.',

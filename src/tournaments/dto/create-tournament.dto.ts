@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateIf,
@@ -17,7 +18,8 @@ import { ForfeitChallengeMode, TournamentFormat } from '../../common/enums';
 
 export class CreateTournamentDto {
   @IsString()
-  @MinLength(2)
+  @MinLength(3)
+  @MaxLength(100)
   name: string;
 
   @IsOptional()
@@ -33,6 +35,7 @@ export class CreateTournamentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(150)
   location?: string;
 
   @IsOptional()
@@ -56,7 +59,7 @@ export class CreateTournamentDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(4)
+  @Max(10)
   courtCount?: number;
 
   @IsOptional()

@@ -1,8 +1,6 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCodes } from '../common/errors/error-codes';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -20,6 +18,7 @@ import {
   Participant,
   Tournament,
   TournamentChallenge,
+  TournamentStatusAudit,
 } from '../entities';
 import { CreateTournamentDto } from './dto/create-tournament.dto';
 import { UpdateTournamentDto } from './dto/update-tournament.dto';
@@ -35,6 +34,21 @@ import { RankingService } from './ranking.service';
 import { DEFAULT_FORFEIT_CHALLENGES } from './forfeit-challenge.constants';
 import { PublicTournamentsService } from './public-tournaments.service';
 import { isPublicTokenExpired } from './public-token.util';
+import {
+  assertNoDuplicateParticipant,
+  validateCourtCount,
+  validateParticipantName,
+  validateTournamentDate,
+  validateTournamentName,
+} from './tournament-domain.validator';
+import {
+  assertDraftStatus,
+  assertInProgressStatus,
+  assertMatchGenerationAllowed,
+  assertStatusTransition,
+  assertTournamentWritable,
+  IN_PROGRESS_BLOCKED_FIELDS,
+} from './tournament-state.machine';
 
 @Injectable()
 export class TournamentsService {
@@ -47,6 +61,8 @@ export class TournamentsService {
     private readonly matchRepo: Repository<Match>,
     @InjectRepository(TournamentChallenge)
     private readonly challengeRepo: Repository<TournamentChallenge>,
+    @InjectRepository(TournamentStatusAudit)
+    private readonly statusAuditRepo: Repository<TournamentStatusAudit>,
     private readonly rankingService: RankingService,
     private readonly publicTournamentsService: PublicTournamentsService,
   ) {}
@@ -56,17 +72,17 @@ export class TournamentsService {
 
     const tournament = this.tournamentRepo.create({
       organizerId: organizer.id,
-      name: dto.name,
+      name: validateTournamentName(dto.name),
       description: dto.description,
-      date: dto.date,
-      location: dto.location,
+      date: validateTournamentDate(dto.date),
+      location: dto.location?.trim() || undefined,
       logoUrl: dto.logoUrl,
       scoreLimit: dto.scoreLimit,
       hasTieBreak: dto.hasTieBreak,
       walkoverScoreWinner: dto.walkoverScoreWinner,
       walkoverScoreLoser: dto.walkoverScoreLoser,
       format: dto.format ?? TournamentFormat.SUPER_8,
-      courtCount: dto.courtCount ?? 1,
+      courtCount: validateCourtCount(dto.courtCount ?? 1),
       enableForfeitChallenge: dto.enableForfeitChallenge ?? false,
       forfeitChallengeMode: dto.forfeitChallengeMode,
       customChallenges: dto.customChallenges,
@@ -94,12 +110,16 @@ export class TournamentsService {
 
   async update(organizer: Organizer, id: string, dto: UpdateTournamentDto) {
     const tournament = await this.getOwnedTournament(organizer, id);
+    assertTournamentWritable(tournament.status);
 
-    if (tournament.status !== TournamentStatus.DRAFT) {
-      if (dto.courtCount !== undefined && dto.courtCount !== tournament.courtCount) {
-        throw new BadRequestException(
-          'Não é possível alterar a quantidade de quadras após gerar as partidas',
-        );
+    if (tournament.status === TournamentStatus.IN_PROGRESS) {
+      for (const field of IN_PROGRESS_BLOCKED_FIELDS) {
+        if (dto[field] !== undefined && dto[field] !== tournament[field]) {
+          throw new AppException(
+            ErrorCodes.TOURNAMENT_ALREADY_STARTED,
+            'Não é possível alterar este torneio após o início.',
+          );
+        }
       }
       const draftOnlyFields: (keyof UpdateTournamentDto)[] = [
         'scoreLimit',
@@ -112,8 +132,9 @@ export class TournamentsService {
       ];
       for (const field of draftOnlyFields) {
         if (dto[field] !== undefined) {
-          throw new BadRequestException(
-            `Não é possível alterar "${String(field)}" com o torneio em andamento ou finalizado`,
+          throw new AppException(
+            ErrorCodes.TOURNAMENT_ALREADY_STARTED,
+            'Não é possível alterar este torneio após o início.',
           );
         }
       }
@@ -123,22 +144,65 @@ export class TournamentsService {
       this.validateForfeitConfig({ ...tournament, ...dto } as CreateTournamentDto);
     }
 
-    Object.assign(tournament, dto);
+    if (dto.name !== undefined) {
+      tournament.name = validateTournamentName(dto.name);
+    }
+    if (dto.date !== undefined) {
+      tournament.date = validateTournamentDate(dto.date);
+    }
+    if (dto.courtCount !== undefined) {
+      tournament.courtCount = validateCourtCount(dto.courtCount);
+    }
+    if (dto.location !== undefined) {
+      tournament.location = dto.location.trim() || undefined;
+    }
+    if (dto.description !== undefined) tournament.description = dto.description;
+    if (dto.logoUrl !== undefined) tournament.logoUrl = dto.logoUrl;
+    if (dto.format !== undefined) tournament.format = dto.format;
+    if (dto.scoreLimit !== undefined) tournament.scoreLimit = dto.scoreLimit;
+    if (dto.hasTieBreak !== undefined) tournament.hasTieBreak = dto.hasTieBreak;
+    if (dto.walkoverScoreWinner !== undefined) {
+      tournament.walkoverScoreWinner = dto.walkoverScoreWinner;
+    }
+    if (dto.walkoverScoreLoser !== undefined) {
+      tournament.walkoverScoreLoser = dto.walkoverScoreLoser;
+    }
+    if (dto.enableForfeitChallenge !== undefined) {
+      tournament.enableForfeitChallenge = dto.enableForfeitChallenge;
+    }
+    if (dto.forfeitChallengeMode !== undefined) {
+      tournament.forfeitChallengeMode = dto.forfeitChallengeMode;
+    }
+    if (dto.customChallenges !== undefined) {
+      tournament.customChallenges = dto.customChallenges;
+    }
+
     return this.tournamentRepo.save(tournament);
   }
 
   async cancel(organizer: Organizer, id: string) {
     const tournament = await this.getOwnedTournament(organizer, id);
-    if (tournament.status === TournamentStatus.FINISHED) {
-      throw new BadRequestException('Torneio finalizado não pode ser cancelado');
+    if (tournament.status === TournamentStatus.CANCELLED) {
+      return tournament;
     }
+    assertStatusTransition(tournament.status, TournamentStatus.CANCELLED);
+
+    const fromStatus = tournament.status;
     tournament.status = TournamentStatus.CANCELLED;
     tournament.cancelledAt = new Date();
-    return this.tournamentRepo.save(tournament);
+    const saved = await this.tournamentRepo.save(tournament);
+    await this.recordStatusChange(
+      tournament.id,
+      fromStatus,
+      TournamentStatus.CANCELLED,
+      organizer.id,
+    );
+    return saved;
   }
 
   async remove(organizer: Organizer, id: string) {
     const tournament = await this.getOwnedTournament(organizer, id);
+    assertDraftStatus(tournament.status, 'excluir o torneio');
     await this.tournamentRepo.remove(tournament);
     return { deleted: true };
   }
@@ -149,29 +213,35 @@ export class TournamentsService {
     dto: CreateParticipantDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    this.assertDraft(tournament, 'adicionar participantes');
+    assertDraftStatus(tournament.status, 'adicionar participantes');
 
     const participants = await this.participantRepo.find({
       where: { tournamentId },
     });
     if (participants.length >= 8) {
-      throw new BadRequestException('O Super 8 permite no máximo 8 participantes');
+      throw new AppException(
+        ErrorCodes.INVALID_PARTICIPANT_COUNT,
+        'O torneio deve possuir exatamente 8 participantes.',
+      );
     }
+
+    const normalizedName = validateParticipantName(dto.name);
+    assertNoDuplicateParticipant(participants, normalizedName);
 
     if (tournament.format === TournamentFormat.SUPER_8_MIXED) {
       if (!dto.gender) {
-        throw new BadRequestException(
-          'Participantes do Super 8 Misto devem informar o gênero',
+        throw new AppException(
+          ErrorCodes.VALIDATION_ERROR,
+          'Participantes do Super 8 Misto devem informar o gênero.',
         );
       }
       const sameGenderCount = participants.filter(
         (p) => p.gender === dto.gender,
       ).length;
       if (sameGenderCount >= 4) {
-        throw new BadRequestException(
-          dto.gender === Gender.MALE
-            ? 'O Super 8 Misto permite no máximo 4 homens'
-            : 'O Super 8 Misto permite no máximo 4 mulheres',
+        throw new AppException(
+          ErrorCodes.INVALID_MIXED_GENDER_DISTRIBUTION,
+          'O Super 8 Misto exige exatamente 4 homens e 4 mulheres.',
         );
       }
     }
@@ -179,6 +249,7 @@ export class TournamentsService {
     const participant = this.participantRepo.create({
       tournamentId,
       ...dto,
+      name: normalizedName,
       status: ParticipantStatus.ACTIVE,
     });
     return this.participantRepo.save(participant);
@@ -199,10 +270,27 @@ export class TournamentsService {
     dto: UpdateParticipantDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    this.assertDraft(tournament, 'editar participantes');
+    assertDraftStatus(tournament.status, 'editar participantes');
 
     const participant = await this.getParticipant(tournamentId, participantId);
-    Object.assign(participant, dto);
+    const participants = await this.participantRepo.find({
+      where: { tournamentId },
+    });
+
+    if (dto.name !== undefined) {
+      participant.name = validateParticipantName(dto.name);
+      assertNoDuplicateParticipant(
+        participants,
+        participant.name,
+        participantId,
+      );
+    }
+    if (dto.gender !== undefined) participant.gender = dto.gender;
+    if (dto.phone !== undefined) participant.phone = dto.phone;
+    if (dto.instagram !== undefined) participant.instagram = dto.instagram;
+    if (dto.photoUrl !== undefined) participant.photoUrl = dto.photoUrl;
+    if (dto.notes !== undefined) participant.notes = dto.notes;
+
     return this.participantRepo.save(participant);
   }
 
@@ -212,7 +300,7 @@ export class TournamentsService {
     participantId: string,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    this.assertDraft(tournament, 'remover participantes');
+    assertDraftStatus(tournament.status, 'remover participantes');
 
     const participant = await this.getParticipant(tournamentId, participantId);
     await this.participantRepo.remove(participant);
@@ -221,16 +309,21 @@ export class TournamentsService {
 
   async generateMatches(organizer: Organizer, tournamentId: string) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    this.assertDraft(tournament, 'gerar partidas');
+    assertMatchGenerationAllowed(tournament.status);
+    validateTournamentDate(tournament.date);
 
     const existingMatches = await this.matchRepo.count({ where: { tournamentId } });
     if (existingMatches > 0) {
-      throw new BadRequestException('Este torneio já possui partidas geradas');
+      throw new AppException(
+        ErrorCodes.MATCHES_ALREADY_GENERATED,
+        'As partidas deste torneio já foram geradas.',
+      );
     }
 
     const participants = await this.participantRepo.find({
       where: { tournamentId },
     });
+    this.assertNoDuplicateParticipants(participants);
 
     let generated;
     if (tournament.format === TournamentFormat.SUPER_8_MIXED) {
@@ -238,13 +331,15 @@ export class TournamentsService {
       const females = participants.filter((p) => p.gender === Gender.FEMALE);
 
       if (participants.length !== 8) {
-        throw new BadRequestException(
-          'O Super 8 Misto exige exatamente 8 participantes cadastrados',
+        throw new AppException(
+          ErrorCodes.INVALID_PARTICIPANT_COUNT,
+          'O torneio deve possuir exatamente 8 participantes.',
         );
       }
       if (males.length !== 4 || females.length !== 4) {
-        throw new BadRequestException(
-          'O Super 8 Misto exige exatamente 4 homens e 4 mulheres',
+        throw new AppException(
+          ErrorCodes.INVALID_MIXED_GENDER_DISTRIBUTION,
+          'O Super 8 Misto exige exatamente 4 homens e 4 mulheres.',
         );
       }
 
@@ -256,8 +351,9 @@ export class TournamentsService {
       );
     } else {
       if (participants.length !== 8) {
-        throw new BadRequestException(
-          'O Super 8 exige exatamente 8 participantes cadastrados',
+        throw new AppException(
+          ErrorCodes.INVALID_PARTICIPANT_COUNT,
+          'O torneio deve possuir exatamente 8 participantes.',
         );
       }
 
@@ -271,8 +367,16 @@ export class TournamentsService {
     const entities = generated.map((g) => this.matchRepo.create(g));
     await this.matchRepo.save(entities);
 
+    const fromStatus = tournament.status;
+    assertStatusTransition(fromStatus, TournamentStatus.IN_PROGRESS);
     tournament.status = TournamentStatus.IN_PROGRESS;
     await this.tournamentRepo.save(tournament);
+    await this.recordStatusChange(
+      tournamentId,
+      fromStatus,
+      TournamentStatus.IN_PROGRESS,
+      organizer.id,
+    );
 
     return this.listMatches(organizer, tournamentId);
   }
@@ -301,15 +405,14 @@ export class TournamentsService {
     dto: UpdateMatchResultDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    if (tournament.status !== TournamentStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Só é possível registrar resultados em torneios em andamento',
-      );
-    }
+    assertInProgressStatus(tournament.status, 'registrar resultados');
 
     const match = await this.getMatch(tournamentId, matchId);
     if (match.status !== MatchStatus.PENDING) {
-      throw new BadRequestException('Partida já finalizada ou cancelada');
+      throw new AppException(
+        ErrorCodes.MATCH_ALREADY_FINISHED,
+        'Esta partida já foi finalizada.',
+      );
     }
 
     const winnerTeam = validateMatchScore(
@@ -345,18 +448,17 @@ export class TournamentsService {
     dto: UpdateMatchResultDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    if (tournament.status !== TournamentStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Só é possível editar resultados em torneios em andamento',
-      );
-    }
+    assertInProgressStatus(tournament.status, 'editar resultados');
 
     const match = await this.getMatch(tournamentId, matchId);
     if (
       match.status !== MatchStatus.FINISHED &&
       match.status !== MatchStatus.WALKOVER
     ) {
-      throw new BadRequestException('Partida não possui resultado para editar');
+      throw new AppException(
+        ErrorCodes.BUSINESS_RULE_ERROR,
+        'Partida não possui resultado para editar.',
+      );
     }
 
     const winnerTeam = validateMatchScore(
@@ -392,15 +494,14 @@ export class TournamentsService {
     dto: WalkoverMatchDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    if (tournament.status !== TournamentStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Só é possível marcar W.O. em torneios em andamento',
-      );
-    }
+    assertInProgressStatus(tournament.status, 'marcar W.O.');
 
     const match = await this.getMatch(tournamentId, matchId);
     if (match.status !== MatchStatus.PENDING) {
-      throw new BadRequestException('Partida já finalizada ou cancelada');
+      throw new AppException(
+        ErrorCodes.MATCH_ALREADY_FINISHED,
+        'Esta partida já foi finalizada.',
+      );
     }
 
     const { walkoverScoreWinner, walkoverScoreLoser } = tournament;
@@ -435,15 +536,14 @@ export class TournamentsService {
     dto: WithdrawParticipantDto,
   ) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    if (tournament.status !== TournamentStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Desistência só pode ser registrada em torneios em andamento',
-      );
-    }
+    assertInProgressStatus(tournament.status, 'registrar desistência');
 
     const participant = await this.getParticipant(tournamentId, participantId);
     if (participant.status === ParticipantStatus.WITHDRAWN) {
-      throw new BadRequestException('Participante já está desistente');
+      throw new AppException(
+        ErrorCodes.BUSINESS_RULE_ERROR,
+        'Participante já está desistente.',
+      );
     }
 
     participant.status = ParticipantStatus.WITHDRAWN;
@@ -525,24 +625,29 @@ export class TournamentsService {
 
   async finish(organizer: Organizer, tournamentId: string) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    if (tournament.status !== TournamentStatus.IN_PROGRESS) {
-      throw new BadRequestException(
-        'Só é possível finalizar torneios em andamento',
-      );
-    }
+    assertStatusTransition(tournament.status, TournamentStatus.FINISHED);
+    assertInProgressStatus(tournament.status, 'finalizar o torneio');
 
     const pending = await this.matchRepo.count({
       where: { tournamentId, status: MatchStatus.PENDING },
     });
     if (pending > 0) {
-      throw new BadRequestException(
-        'Todas as partidas devem estar finalizadas ou com W.O. antes de encerrar o torneio',
+      throw new AppException(
+        ErrorCodes.TOURNAMENT_CANNOT_BE_FINISHED,
+        'Todas as partidas devem estar finalizadas ou com W.O. antes de encerrar o torneio.',
       );
     }
 
+    const fromStatus = tournament.status;
     tournament.status = TournamentStatus.FINISHED;
     tournament.finishedAt = new Date();
     await this.tournamentRepo.save(tournament);
+    await this.recordStatusChange(
+      tournamentId,
+      fromStatus,
+      TournamentStatus.FINISHED,
+      organizer.id,
+    );
 
     if (tournament.enableForfeitChallenge) {
       await this.drawForfeitChallenge(tournament);
@@ -584,8 +689,9 @@ export class TournamentsService {
   async getHighlights(organizer: Organizer, tournamentId: string) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
     if (tournament.format !== TournamentFormat.SUPER_8_MIXED) {
-      throw new BadRequestException(
-        'Destaques por gênero disponíveis apenas para torneios Super 8 Misto',
+      throw new AppException(
+        ErrorCodes.BUSINESS_RULE_ERROR,
+        'Destaques por gênero disponíveis apenas para torneios Super 8 Misto.',
       );
     }
 
@@ -596,7 +702,7 @@ export class TournamentsService {
 
     const { ranking } = await this.rankingService.calculate(tournament);
     if (!ranking.length) {
-      throw new BadRequestException('Ranking vazio');
+      throw new AppException(ErrorCodes.BUSINESS_RULE_ERROR, 'Ranking vazio.');
     }
 
     return {
@@ -620,14 +726,15 @@ export class TournamentsService {
       'organizer',
     ]);
     if (tournament.status !== TournamentStatus.FINISHED) {
-      throw new BadRequestException(
-        'Card disponível apenas para torneios finalizados',
+      throw new AppException(
+        ErrorCodes.TOURNAMENT_ALREADY_FINISHED,
+        'Card disponível apenas para torneios finalizados.',
       );
     }
 
     const { ranking } = await this.rankingService.calculate(tournament);
     if (!ranking.length) {
-      throw new BadRequestException('Ranking vazio');
+      throw new AppException(ErrorCodes.BUSINESS_RULE_ERROR, 'Ranking vazio.');
     }
 
     const baseRanking = ranking.map((r) => ({
@@ -715,8 +822,9 @@ export class TournamentsService {
         : DEFAULT_FORFEIT_CHALLENGES;
 
     if (!pool.length) {
-      throw new BadRequestException(
-        'Lista de prendas personalizada vazia',
+      throw new AppException(
+        ErrorCodes.VALIDATION_ERROR,
+        'Lista de prendas personalizada vazia.',
       );
     }
 
@@ -802,11 +910,35 @@ export class TournamentsService {
     return match;
   }
 
-  private assertDraft(tournament: Tournament, action: string) {
-    if (tournament.status !== TournamentStatus.DRAFT) {
-      throw new BadRequestException(
-        `Não é possível ${action} quando o torneio não está em rascunho`,
-      );
+  private async recordStatusChange(
+    tournamentId: string,
+    fromStatus: TournamentStatus,
+    toStatus: TournamentStatus,
+    changedByUserId: string,
+  ): Promise<void> {
+    if (fromStatus === toStatus) return;
+
+    await this.statusAuditRepo.save(
+      this.statusAuditRepo.create({
+        tournamentId,
+        fromStatus,
+        toStatus,
+        changedByUserId,
+      }),
+    );
+  }
+
+  private assertNoDuplicateParticipants(participants: Participant[]): void {
+    const seen = new Set<string>();
+    for (const participant of participants) {
+      const key = participant.name.trim().toLowerCase();
+      if (seen.has(key)) {
+        throw new AppException(
+          ErrorCodes.DUPLICATED_PARTICIPANT,
+          'Já existe um participante com este nome.',
+        );
+      }
+      seen.add(key);
     }
   }
 
@@ -821,8 +953,9 @@ export class TournamentsService {
   private validateForfeitConfig(dto: Partial<CreateTournamentDto>) {
     if (dto.enableForfeitChallenge && dto.forfeitChallengeMode === ForfeitChallengeMode.CUSTOM) {
       if (!dto.customChallenges?.length) {
-        throw new BadRequestException(
-          'Informe ao menos uma prenda personalizada no modo CUSTOM',
+        throw new AppException(
+          ErrorCodes.VALIDATION_ERROR,
+          'Informe ao menos uma prenda personalizada no modo CUSTOM.',
         );
       }
     }

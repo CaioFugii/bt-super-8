@@ -5,6 +5,6 @@ import { IsOptional, IsString, MinLength } from 'class-validator';
 export class UpdateTournamentDto extends PartialType(CreateTournamentDto) {
   @IsOptional()
   @IsString()
-  @MinLength(2)
+  @MinLength(3)
   name?: string;
 }
