@@ -25,9 +25,12 @@
 
 API do **BT Super 8** — backend em [NestJS](https://github.com/nestjs/nest) para gestão de torneios Super 8 de beach tennis.
 
-## Repositório
+## Repositórios
 
-Código-fonte: [https://github.com/CaioFugii/bt-super-8](https://github.com/CaioFugii/bt-super-8.git)
+| Projeto | Repositório |
+| --- | --- |
+| API | [https://github.com/CaioFugii/bt-super-8](https://github.com/CaioFugii/bt-super-8.git) |
+| App mobile | [https://github.com/CaioFugii/bt-super-8-mobile](https://github.com/CaioFugii/bt-super-8-mobile.git) |
 
 ## Project setup
 
