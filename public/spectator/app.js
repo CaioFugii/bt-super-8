@@ -19,6 +19,14 @@ const MATCH_STATUS_LABEL = {
   CANCELLED: 'Cancelado',
 };
 
+const NETWORK_MESSAGE =
+  'Não foi possível conectar ao servidor.\nVerifique sua internet e tente novamente.';
+
+const UNEXPECTED_MESSAGE =
+  'Ocorreu um erro inesperado.\nTente novamente em alguns instantes.';
+
+let currentToken = null;
+
 function getTokenFromPath() {
   const match = window.location.pathname.match(/\/t\/([^/]+)\/?$/);
   return match ? match[1] : null;
@@ -29,38 +37,64 @@ function formatDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
-function formatExpiresMessage(error) {
-  if (error.code === 'EXPIRED') {
-    return 'Link expirado.\nSolicite um novo link ao organizador.';
+function parseApiError(body) {
+  if (body && typeof body.code === 'string' && typeof body.message === 'string') {
+    return body;
   }
-  if (error.code === 'REVOKED') {
-    return 'Link indisponível.\nSolicite um novo link ao organizador.';
+  if (body?.message && typeof body.message === 'object') {
+    return body.message;
+  }
+  if (typeof body?.message === 'string') {
+    return { message: body.message };
+  }
+  return { message: 'Torneio não encontrado.' };
+}
+
+function formatErrorMessage(error) {
+  if (error.code === 'PUBLIC_LINK_EXPIRED' || error.code === 'EXPIRED') {
+    return 'Link expirado.\n\nSolicite um novo link ao organizador.';
+  }
+  if (error.code === 'PUBLIC_LINK_REVOKED' || error.code === 'REVOKED') {
+    return 'Este link não está mais disponível.';
+  }
+  if (
+    error.code === 'PUBLIC_LINK_INVALID' ||
+    error.code === 'NOT_FOUND' ||
+    error.code === 'TOURNAMENT_NOT_FOUND'
+  ) {
+    return 'Torneio não encontrado.';
   }
   return error.message || 'Torneio não encontrado.';
 }
 
-function parseApiError(body) {
-  if (body.message && typeof body.message === 'object') {
-    return body.message;
-  }
-  return {
-    code: typeof body.code === 'string' ? body.code : undefined,
-    message: typeof body.message === 'string' ? body.message : undefined,
-  };
-}
-
 async function fetchTournament(token) {
-  const res = await fetch(`${API_URL}/public/tournaments/${token}`);
+  let res;
+  try {
+    res = await fetch(`${API_URL}/public/tournaments/${token}`);
+  } catch {
+    throw new Error(NETWORK_MESSAGE);
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(formatExpiresMessage(parseApiError(body)));
+    throw new Error(formatErrorMessage(parseApiError(body)));
   }
   return res.json();
 }
 
-function renderError(message) {
+function renderError(message, { retry = false } = {}) {
   const app = document.getElementById('app');
-  app.innerHTML = `<div class="error-box">${message.replace(/\n/g, '<br>')}</div>`;
+  const retryButton = retry
+    ? '<button type="button" class="retry-btn" id="retry-btn">Tentar novamente</button>'
+    : '';
+
+  app.innerHTML = `<div class="error-box">${message.replace(/\n/g, '<br>')}${retryButton}</div>`;
+
+  if (retry) {
+    document.getElementById('retry-btn')?.addEventListener('click', () => {
+      if (currentToken) boot(currentToken);
+    });
+  }
 }
 
 function renderMatches(data) {
@@ -230,9 +264,9 @@ function renderApp(data) {
   });
 }
 
-async function boot() {
+async function boot(token = getTokenFromPath()) {
   const app = document.getElementById('app');
-  const token = getTokenFromPath();
+  currentToken = token;
 
   if (!token) {
     renderError('Link inválido.');
@@ -245,7 +279,15 @@ async function boot() {
     const data = await fetchTournament(token);
     renderApp(data);
   } catch (e) {
-    renderError(e instanceof Error ? e.message : 'Erro ao carregar torneio.');
+    const message = e instanceof Error ? e.message : UNEXPECTED_MESSAGE;
+    const isRetryable =
+      message === NETWORK_MESSAGE || message === UNEXPECTED_MESSAGE;
+    renderError(
+      isRetryable
+        ? 'Não foi possível carregar as informações.'
+        : message,
+      { retry: isRetryable },
+    );
   }
 }
 

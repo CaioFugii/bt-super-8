@@ -258,7 +258,7 @@ describe('Tournament flow (e2e)', () => {
       .get(`/api/public/tournaments/${expiredToken}`)
       .expect(410);
 
-    expect(res.body.message?.code ?? res.body.code).toBe('EXPIRED');
+    expect(res.body.code).toBe('PUBLIC_LINK_EXPIRED');
 
     const page = await request(app.getHttpServer())
       .get(`/t/${expiredToken}`)

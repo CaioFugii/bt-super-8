@@ -141,6 +141,18 @@ body {
   text-align: center;
 }
 
+.retry-btn {
+  display: block;
+  margin: 16px auto 0;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .loading {
   text-align: center;
   padding: 40px 16px;

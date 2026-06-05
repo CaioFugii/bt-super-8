@@ -88,8 +88,8 @@ export class PublicTournamentsService {
     const revoked = await this.revokedRepo.findOne({ where: { token: publicToken } });
     if (revoked) {
       throw new GoneException({
-        code: 'REVOKED',
-        message: 'Link indisponível. Solicite um novo link ao organizador.',
+        code: 'PUBLIC_LINK_REVOKED',
+        message: 'Este link não está mais disponível.',
       });
     }
 
@@ -99,14 +99,14 @@ export class PublicTournamentsService {
 
     if (!tournament) {
       throw new NotFoundException({
-        code: 'NOT_FOUND',
+        code: 'PUBLIC_LINK_INVALID',
         message: 'Torneio não encontrado.',
       });
     }
 
     if (isPublicTokenExpired(tournament.publicTokenExpiresAt)) {
       throw new GoneException({
-        code: 'EXPIRED',
+        code: 'PUBLIC_LINK_EXPIRED',
         message: 'Link expirado. Solicite um novo link ao organizador.',
       });
     }

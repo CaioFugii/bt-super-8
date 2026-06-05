@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
 import { WinnerTeam } from '../common/enums';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCodes } from '../common/errors/error-codes';
 
 const VALID_WITHOUT_TIEBREAK: Record<4 | 6, Set<string>> = {
   6: new Set(['6-0', '6-1', '6-2', '6-3', '6-4', '6-5']),
@@ -10,6 +11,13 @@ const VALID_WITH_TIEBREAK: Record<4 | 6, Set<string>> = {
   6: new Set(['6-0', '6-1', '6-2', '6-3', '6-4', '7-5', '7-6']),
   4: new Set(['4-0', '4-1', '4-2', '5-3', '5-4']),
 };
+
+function invalidScore(): never {
+  throw new AppException(
+    ErrorCodes.INVALID_SCORE,
+    'Informe um placar válido.',
+  );
+}
 
 export function normalizeScoreKey(winner: number, loser: number): string {
   return `${winner}-${loser}`;
@@ -22,7 +30,7 @@ export function validateMatchScore(
   hasTieBreak: boolean,
 ): WinnerTeam {
   if (teamAScore === teamBScore) {
-    throw new BadRequestException('O placar não pode terminar em empate');
+    invalidScore();
   }
 
   const winnerScore = Math.max(teamAScore, teamBScore);
@@ -33,9 +41,7 @@ export function validateMatchScore(
     : VALID_WITHOUT_TIEBREAK[scoreLimit];
 
   if (!validSet.has(key)) {
-    throw new BadRequestException(
-      `Placar inválido para a configuração do torneio (${scoreLimit} games, tie-break ${hasTieBreak ? 'ativo' : 'inativo'})`,
-    );
+    invalidScore();
   }
 
   return teamAScore > teamBScore ? WinnerTeam.TEAM_A : WinnerTeam.TEAM_B;
@@ -51,8 +57,6 @@ export function validateWinnerMatchesScore(
       ? teamAScore > teamBScore
       : teamBScore > teamAScore;
   if (!expected) {
-    throw new BadRequestException(
-      'O vencedor informado não corresponde ao placar',
-    );
+    invalidScore();
   }
 }

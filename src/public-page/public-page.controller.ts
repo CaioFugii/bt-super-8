@@ -2,11 +2,13 @@ import {
   Controller,
   Get,
   GoneException,
+  HttpException,
   NotFoundException,
   Param,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { isAppErrorBody } from '../common/errors/app.exception';
 import { PublicTournamentsService } from '../tournaments/public-tournaments.service';
 import {
   renderSpectatorErrorPage,
@@ -27,24 +29,18 @@ export class PublicPageController {
       res.type('html').send(renderSpectatorPage());
     } catch (error) {
       const status =
-        error instanceof NotFoundException
-          ? 404
-          : error instanceof GoneException
-            ? 410
-            : 400;
+        error instanceof HttpException ? error.getStatus() : 400;
+      const response =
+        error instanceof HttpException ? error.getResponse() : null;
+      const message = isAppErrorBody(response)
+        ? response.message
+        : typeof response === 'object' &&
+            response !== null &&
+            isAppErrorBody((response as { message?: unknown }).message)
+          ? (response as { message: { message: string } }).message.message
+          : 'Torneio não encontrado.';
 
-      const body = error instanceof NotFoundException || error instanceof GoneException
-        ? (error.getResponse() as { message?: string | { message?: string } })
-        : null;
-
-      const message =
-        typeof body?.message === 'object'
-          ? body.message.message
-          : typeof body?.message === 'string'
-            ? body.message
-            : 'Torneio não encontrado.';
-
-      res.status(status).type('html').send(renderSpectatorErrorPage(message ?? 'Erro.'));
+      res.status(status).type('html').send(renderSpectatorErrorPage(message));
     }
   }
 }
