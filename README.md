@@ -64,18 +64,75 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
-## Deployment
+## Deploy na Heroku
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Repositório só da API (`bt-super-8`)
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Se o app Heroku aponta para o repositório da API (raiz = pasta `api/`), use o `Procfile` e o `heroku-postbuild` desta pasta. O comando `npm start` executa `node dist/main` (compilado no deploy).
+
+### Monorepo (`bts8`)
+
+Na raiz do monorepo, o `Procfile` executa `cd api && npm run start:prod`.
+
+### Pré-requisitos
+
+- [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
+- Conta Heroku
+
+### Primeiro deploy
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# Na raiz do repositório
+heroku login
+heroku create seu-app-bts8
+heroku addons:create heroku-postgresql:essential-0
+
+heroku config:set \
+  APP_BASE_URL=https://seu-app-bts8.herokuapp.com \
+  JWT_SECRET="$(openssl rand -hex 32)" \
+  JWT_EXPIRES_IN=7d \
+  STORAGE_PROVIDER=cloudinary \
+  CLOUDINARY_CLOUD_NAME=seu-cloud \
+  CLOUDINARY_API_KEY=sua-key \
+  CLOUDINARY_API_SECRET=seu-secret \
+  CLOUDINARY_FOLDER=bts8
+
+git push heroku main
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+O addon Postgres define `DATABASE_URL` automaticamente. As migrations rodam na subida (`DB_MIGRATIONS_RUN=true`).
+
+### Variáveis de ambiente
+
+| Variável | Obrigatória | Descrição |
+| --- | --- | --- |
+| `DATABASE_URL` | Sim (Heroku) | Injetada pelo Heroku Postgres |
+| `JWT_SECRET` | Sim | Segredo do JWT |
+| `APP_BASE_URL` | Sim | URL pública (`https://seu-app.herokuapp.com`) |
+| `PORT` | Auto | Definida pela Heroku |
+| `CLOUDINARY_*` | Não | Upload de imagens |
+| `DB_MIGRATIONS_RUN` | Não | Default `true` |
+
+### Comandos úteis
+
+```bash
+heroku logs --tail
+heroku run bash -c "cd api && npm run migration:show"
+heroku open
+```
+
+### Mobile apontando para produção
+
+```env
+EXPO_PUBLIC_API_URL=https://seu-app-bts8.herokuapp.com/api
+```
+
+### Deploy local (simular build Heroku)
+
+```bash
+npm run heroku-postbuild
+cd api && npm run start:prod
+```
 
 ## Resources
 
