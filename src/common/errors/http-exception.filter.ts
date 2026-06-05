@@ -4,28 +4,57 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
+  Injectable,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { AppLoggerService } from '../../observability/app-logger.service';
+import { getCorrelationId } from '../../observability/correlation-id.store';
 import { AppErrorBody, isAppErrorBody } from './app.exception';
 import { ErrorCodes } from './error-codes';
 import { mapMessageToError } from './message-code-map';
 
+@Injectable()
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
+  constructor(private readonly appLogger: AppLoggerService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
     const { status, body } = this.normalize(exception);
 
-    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error('Unhandled error', exception);
-    }
+    this.logError(exception, status, body, request);
 
     response.status(status).json(body);
+  }
+
+  private logError(
+    exception: unknown,
+    status: number,
+    body: AppErrorBody,
+    request: Request,
+  ): void {
+    const route = `${request.method} ${request.path}`;
+    const correlationId = request.correlationId ?? getCorrelationId();
+    const fields: Record<string, unknown> = {
+      code: body.code,
+      route,
+      correlationId,
+      status,
+    };
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      fields.stack =
+        exception instanceof Error ? exception.stack : String(exception);
+      this.appLogger.logEvent('error', 'UNEXPECTED_ERROR', fields);
+      return;
+    }
+
+    if (status >= HttpStatus.BAD_REQUEST) {
+      this.appLogger.logEvent('warn', 'API_ERROR', fields);
+    }
   }
 
   private normalize(exception: unknown): { status: number; body: AppErrorBody } {

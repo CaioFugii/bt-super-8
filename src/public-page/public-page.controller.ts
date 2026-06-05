@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { isAppErrorBody } from '../common/errors/app.exception';
+import { AppLoggerService } from '../observability/app-logger.service';
 import { PublicTournamentsService } from '../tournaments/public-tournaments.service';
 import {
   renderSpectatorErrorPage,
@@ -17,7 +18,10 @@ import {
 
 @Controller('t')
 export class PublicPageController {
-  constructor(private readonly publicService: PublicTournamentsService) {}
+  constructor(
+    private readonly publicService: PublicTournamentsService,
+    private readonly appLogger: AppLoggerService,
+  ) {}
 
   @Get(':publicToken')
   async getPage(
@@ -26,6 +30,9 @@ export class PublicPageController {
   ) {
     try {
       await this.publicService.validatePublicToken(publicToken);
+      this.appLogger.logEvent('info', 'PUBLIC_PAGE_ACCESS', {
+        publicToken,
+      });
       res.type('html').send(renderSpectatorPage());
     } catch (error) {
       const status =

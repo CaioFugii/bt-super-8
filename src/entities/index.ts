@@ -6,3 +6,4 @@ export { TournamentChallenge } from './tournament-challenge.entity';
 export { RevokedPublicToken } from './revoked-public-token.entity';
 export { TournamentStatusAudit } from './tournament-status-audit.entity';
 export { AdminAuditLog } from './admin-audit-log.entity';
+export { AuditLog } from './audit-log.entity';

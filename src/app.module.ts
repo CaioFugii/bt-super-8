@@ -10,10 +10,12 @@ import { StorageModule } from './storage/storage.module';
 import { UploadModule } from './upload/upload.module';
 import { PublicPageModule } from './public-page/public-page.module';
 import { AdminModule } from './admin/admin.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ObservabilityModule,
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'public', 'spectator'),
       serveRoot: '/spectator',

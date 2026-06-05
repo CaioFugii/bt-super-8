@@ -7,7 +7,7 @@ import {
 import { ValidationError } from 'class-validator';
 import { AppException } from './common/errors/app.exception';
 import { ErrorCodes } from './common/errors/error-codes';
-import { HttpExceptionFilter } from './common/errors/http-exception.filter';
+import { correlationIdMiddleware } from './observability/correlation-id.middleware';
 
 function formatValidationErrors(errors: ValidationError[]): string[] {
   return errors.flatMap((error) => {
@@ -38,7 +38,7 @@ export function configureApp(app: INestApplication): void {
     exclude: [{ path: 't/:publicToken', method: RequestMethod.GET }],
   });
   app.enableCors();
-  app.useGlobalFilters(new HttpExceptionFilter());
+  app.use(correlationIdMiddleware);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

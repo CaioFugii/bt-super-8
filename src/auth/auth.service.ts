@@ -11,6 +11,7 @@ import { OrganizerStatus, UserRole } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { Organizer } from '../entities';
+import { AppLoggerService } from '../observability/app-logger.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { USER_INACTIVE_MESSAGE } from './user-inactive.constants';
@@ -21,6 +22,7 @@ export class AuthService {
     @InjectRepository(Organizer)
     private readonly organizerRepo: Repository<Organizer>,
     private readonly jwtService: JwtService,
+    private readonly appLogger: AppLoggerService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -50,21 +52,39 @@ export class AuthService {
       where: { email: dto.email.toLowerCase() },
     });
     if (!organizer) {
+      this.appLogger.logEvent('warn', 'LOGIN_FAILED', {
+        email: dto.email.toLowerCase(),
+      });
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     const valid = await bcrypt.compare(dto.password, organizer.passwordHash);
     if (!valid) {
+      this.appLogger.logEvent('warn', 'LOGIN_FAILED', {
+        userId: organizer.id,
+        email: organizer.email,
+      });
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
     if (organizer.status === OrganizerStatus.INACTIVE) {
+      this.appLogger.logEvent('warn', 'LOGIN_FAILED', {
+        userId: organizer.id,
+        email: organizer.email,
+        reason: 'USER_INACTIVE',
+      });
       throw new AppException(
         ErrorCodes.USER_INACTIVE,
         USER_INACTIVE_MESSAGE,
         403,
       );
     }
+
+    this.appLogger.logEvent('info', 'LOGIN_SUCCESS', {
+      userId: organizer.id,
+      organizerId: organizer.id,
+      role: organizer.role,
+    });
 
     return this.buildAuthResponse(organizer);
   }

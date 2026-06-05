@@ -3,13 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import {
-  AdminAuditAction,
+  AuditAction,
+  AuditEntityType,
   OrganizerStatus,
+  TournamentStatus,
   UserRole,
 } from '../common/enums';
 import { AppException } from '../common/errors/app.exception';
 import { ErrorCodes } from '../common/errors/error-codes';
-import { AdminAuditLog, Organizer } from '../entities';
+import { Organizer, Tournament } from '../entities';
+import { AuditService } from '../observability/audit.service';
 import { CreateOrganizerDto } from './dto/create-organizer.dto';
 import { UpdateOrganizerDto } from './dto/update-organizer.dto';
 import { generateTemporaryPassword } from './password.util';
@@ -19,12 +22,21 @@ export class AdminService {
   constructor(
     @InjectRepository(Organizer)
     private readonly organizerRepo: Repository<Organizer>,
-    @InjectRepository(AdminAuditLog)
-    private readonly auditRepo: Repository<AdminAuditLog>,
+    @InjectRepository(Tournament)
+    private readonly tournamentRepo: Repository<Tournament>,
+    private readonly auditService: AuditService,
   ) {}
 
   async getDashboard() {
-    const [activeCount, inactiveCount, totalCount] = await Promise.all([
+    const [
+      activeCount,
+      inactiveCount,
+      totalOrganizers,
+      totalTournaments,
+      activeTournaments,
+      finishedTournaments,
+      cancelledTournaments,
+    ] = await Promise.all([
       this.organizerRepo.count({
         where: { role: UserRole.ORGANIZER, status: OrganizerStatus.ACTIVE },
       }),
@@ -34,9 +46,27 @@ export class AdminService {
       this.organizerRepo.count({
         where: { role: UserRole.ORGANIZER },
       }),
+      this.tournamentRepo.count(),
+      this.tournamentRepo.count({
+        where: { status: TournamentStatus.IN_PROGRESS },
+      }),
+      this.tournamentRepo.count({
+        where: { status: TournamentStatus.FINISHED },
+      }),
+      this.tournamentRepo.count({
+        where: { status: TournamentStatus.CANCELLED },
+      }),
     ]);
 
-    return { activeCount, inactiveCount, totalCount };
+    return {
+      activeCount,
+      inactiveCount,
+      totalCount: totalOrganizers,
+      totalTournaments,
+      activeTournaments,
+      finishedTournaments,
+      cancelledTournaments,
+    };
   }
 
   async listOrganizers() {
@@ -69,7 +99,12 @@ export class AdminService {
       status: OrganizerStatus.ACTIVE,
     });
     await this.organizerRepo.save(organizer);
-    await this.logAction(admin.id, AdminAuditAction.CREATE_ORGANIZER, organizer.id);
+    await this.auditService.record({
+      action: AuditAction.CREATE_ORGANIZER,
+      userId: admin.id,
+      entityType: AuditEntityType.ORGANIZER,
+      entityId: organizer.id,
+    });
 
     return {
       organizer: this.sanitizeOrganizer(organizer),
@@ -98,7 +133,12 @@ export class AdminService {
     organizer.name = dto.name;
     organizer.email = email;
     await this.organizerRepo.save(organizer);
-    await this.logAction(admin.id, AdminAuditAction.UPDATE_ORGANIZER, organizer.id);
+    await this.auditService.record({
+      action: AuditAction.UPDATE_ORGANIZER,
+      userId: admin.id,
+      entityType: AuditEntityType.ORGANIZER,
+      entityId: organizer.id,
+    });
 
     return this.sanitizeOrganizer(organizer);
   }
@@ -107,7 +147,12 @@ export class AdminService {
     const organizer = await this.findOrganizerOrFail(id);
     organizer.status = OrganizerStatus.ACTIVE;
     await this.organizerRepo.save(organizer);
-    await this.logAction(admin.id, AdminAuditAction.ACTIVATE_ORGANIZER, organizer.id);
+    await this.auditService.record({
+      action: AuditAction.ACTIVATE_ORGANIZER,
+      userId: admin.id,
+      entityType: AuditEntityType.ORGANIZER,
+      entityId: organizer.id,
+    });
     return this.sanitizeOrganizer(organizer);
   }
 
@@ -115,7 +160,12 @@ export class AdminService {
     const organizer = await this.findOrganizerOrFail(id);
     organizer.status = OrganizerStatus.INACTIVE;
     await this.organizerRepo.save(organizer);
-    await this.logAction(admin.id, AdminAuditAction.DEACTIVATE_ORGANIZER, organizer.id);
+    await this.auditService.record({
+      action: AuditAction.DEACTIVATE_ORGANIZER,
+      userId: admin.id,
+      entityType: AuditEntityType.ORGANIZER,
+      entityId: organizer.id,
+    });
     return this.sanitizeOrganizer(organizer);
   }
 
@@ -124,7 +174,12 @@ export class AdminService {
     const temporaryPassword = generateTemporaryPassword();
     organizer.passwordHash = await bcrypt.hash(temporaryPassword, 10);
     await this.organizerRepo.save(organizer);
-    await this.logAction(admin.id, AdminAuditAction.RESET_PASSWORD, organizer.id);
+    await this.auditService.record({
+      action: AuditAction.RESET_PASSWORD,
+      userId: admin.id,
+      entityType: AuditEntityType.ORGANIZER,
+      entityId: organizer.id,
+    });
 
     return {
       organizer: this.sanitizeOrganizer(organizer),
@@ -144,15 +199,6 @@ export class AdminService {
       );
     }
     return organizer;
-  }
-
-  private async logAction(
-    adminUserId: string,
-    action: AdminAuditAction,
-    targetUserId: string,
-  ) {
-    const log = this.auditRepo.create({ adminUserId, action, targetUserId });
-    await this.auditRepo.save(log);
   }
 
   private sanitizeOrganizer(organizer: Organizer) {

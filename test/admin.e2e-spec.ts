@@ -5,11 +5,11 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { Repository } from 'typeorm';
 import {
-  AdminAuditAction,
+  AuditAction,
   OrganizerStatus,
   UserRole,
 } from '../src/common/enums';
-import { AdminAuditLog, Organizer } from '../src/entities';
+import { AuditLog, Organizer } from '../src/entities';
 import { authHeader, createE2eApp } from './helpers/e2e-app';
 
 describe('Admin (e2e)', () => {
@@ -101,14 +101,14 @@ describe('Admin (e2e)', () => {
     expect(res.body.organizer.status).toBe('ACTIVE');
     expect(res.body.temporaryPassword).toHaveLength(12);
 
-    const auditRepo = app.get<Repository<AdminAuditLog>>(
-      getRepositoryToken(AdminAuditLog),
+    const auditRepo = app.get<Repository<AuditLog>>(
+      getRepositoryToken(AuditLog),
     );
     const audit = await auditRepo.findOne({
       where: {
-        adminUserId: adminId,
-        action: AdminAuditAction.CREATE_ORGANIZER,
-        targetUserId: res.body.organizer.id,
+        userId: adminId,
+        action: AuditAction.CREATE_ORGANIZER,
+        entityId: res.body.organizer.id,
       },
     });
     expect(audit).toBeTruthy();

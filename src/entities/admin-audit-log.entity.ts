@@ -4,7 +4,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { AdminAuditAction } from '../common/enums';
+import { AuditAction } from '../common/enums';
 
 @Entity('admin_audit_logs')
 export class AdminAuditLog {
@@ -14,8 +14,8 @@ export class AdminAuditLog {
   @Column({ name: 'admin_user_id', type: 'uuid' })
   adminUserId: string;
 
-  @Column({ type: 'enum', enum: AdminAuditAction })
-  action: AdminAuditAction;
+  @Column({ type: 'enum', enum: AuditAction })
+  action: AuditAction;
 
   @Column({ name: 'target_user_id', type: 'uuid' })
   targetUserId: string;

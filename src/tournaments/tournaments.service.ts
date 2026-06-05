@@ -4,6 +4,8 @@ import { ErrorCodes } from '../common/errors/error-codes';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
+  AuditAction,
+  AuditEntityType,
   ForfeitChallengeMode,
   Gender,
   MatchStatus,
@@ -32,6 +34,7 @@ import { generateSuper8MixedMatches } from './super8-mixed.generator';
 import { validateMatchScore } from './score.validator';
 import { RankingService } from './ranking.service';
 import { DEFAULT_FORFEIT_CHALLENGES } from './forfeit-challenge.constants';
+import { AuditService } from '../observability/audit.service';
 import { PublicTournamentsService } from './public-tournaments.service';
 import { isPublicTokenExpired } from './public-token.util';
 import {
@@ -65,6 +68,7 @@ export class TournamentsService {
     private readonly statusAuditRepo: Repository<TournamentStatusAudit>,
     private readonly rankingService: RankingService,
     private readonly publicTournamentsService: PublicTournamentsService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(organizer: Organizer, dto: CreateTournamentDto) {
@@ -89,7 +93,15 @@ export class TournamentsService {
       status: TournamentStatus.DRAFT,
     });
 
-    return this.tournamentRepo.save(tournament);
+    const saved = await this.tournamentRepo.save(tournament);
+    await this.auditService.record({
+      action: AuditAction.TOURNAMENT_CREATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: saved.id,
+      metadata: { tournamentId: saved.id, organizerId: organizer.id },
+    });
+    return saved;
   }
 
   async findAll(organizer: Organizer, status?: TournamentStatus) {
@@ -177,7 +189,15 @@ export class TournamentsService {
       tournament.customChallenges = dto.customChallenges;
     }
 
-    return this.tournamentRepo.save(tournament);
+    const saved = await this.tournamentRepo.save(tournament);
+    await this.auditService.record({
+      action: AuditAction.TOURNAMENT_UPDATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: saved.id,
+      metadata: { tournamentId: saved.id, organizerId: organizer.id },
+    });
+    return saved;
   }
 
   async cancel(organizer: Organizer, id: string) {
@@ -197,6 +217,13 @@ export class TournamentsService {
       TournamentStatus.CANCELLED,
       organizer.id,
     );
+    await this.auditService.record({
+      action: AuditAction.TOURNAMENT_CANCELLED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: tournament.id,
+      metadata: { tournamentId: tournament.id, organizerId: organizer.id },
+    });
     return saved;
   }
 
@@ -377,6 +404,13 @@ export class TournamentsService {
       TournamentStatus.IN_PROGRESS,
       organizer.id,
     );
+    await this.auditService.record({
+      action: AuditAction.MATCHES_GENERATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: tournamentId,
+      metadata: { tournamentId, organizerId: organizer.id },
+    });
 
     return this.listMatches(organizer, tournamentId);
   }
@@ -415,6 +449,7 @@ export class TournamentsService {
       );
     }
 
+    const oldScore = formatMatchScore(match.teamAScore, match.teamBScore);
     const winnerTeam = validateMatchScore(
       dto.teamAScore,
       dto.teamBScore,
@@ -428,6 +463,19 @@ export class TournamentsService {
     match.status = MatchStatus.FINISHED;
 
     await this.matchRepo.save(match);
+    await this.auditService.record({
+      action: AuditAction.MATCH_SCORE_UPDATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.MATCH,
+      entityId: match.id,
+      metadata: {
+        matchId: match.id,
+        tournamentId,
+        organizerId: organizer.id,
+        oldScore,
+        newScore: formatMatchScore(dto.teamAScore, dto.teamBScore),
+      },
+    });
     return this.formatMatch(
       await this.matchRepo.findOneOrFail({
         where: { id: match.id },
@@ -461,6 +509,7 @@ export class TournamentsService {
       );
     }
 
+    const oldScore = formatMatchScore(match.teamAScore, match.teamBScore);
     const winnerTeam = validateMatchScore(
       dto.teamAScore,
       dto.teamBScore,
@@ -474,6 +523,19 @@ export class TournamentsService {
     match.status = MatchStatus.FINISHED;
 
     await this.matchRepo.save(match);
+    await this.auditService.record({
+      action: AuditAction.MATCH_SCORE_UPDATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.MATCH,
+      entityId: match.id,
+      metadata: {
+        matchId: match.id,
+        tournamentId,
+        organizerId: organizer.id,
+        oldScore,
+        newScore: formatMatchScore(dto.teamAScore, dto.teamBScore),
+      },
+    });
     return this.formatMatch(
       await this.matchRepo.findOneOrFail({
         where: { id: match.id },
@@ -516,6 +578,19 @@ export class TournamentsService {
     match.status = MatchStatus.WALKOVER;
 
     await this.matchRepo.save(match);
+    await this.auditService.record({
+      action: AuditAction.MATCH_WALKOVER,
+      userId: organizer.id,
+      entityType: AuditEntityType.MATCH,
+      entityId: match.id,
+      metadata: {
+        matchId: match.id,
+        tournamentId,
+        organizerId: organizer.id,
+        winnerTeam: dto.winnerTeam,
+        newScore: formatMatchScore(match.teamAScore, match.teamBScore),
+      },
+    });
     return this.formatMatch(
       await this.matchRepo.findOneOrFail({
         where: { id: match.id },
@@ -648,6 +723,13 @@ export class TournamentsService {
       TournamentStatus.FINISHED,
       organizer.id,
     );
+    await this.auditService.record({
+      action: AuditAction.TOURNAMENT_FINISHED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: tournamentId,
+      metadata: { tournamentId, organizerId: organizer.id },
+    });
 
     if (tournament.enableForfeitChallenge) {
       await this.drawForfeitChallenge(tournament);
@@ -658,12 +740,31 @@ export class TournamentsService {
 
   async generateShareLink(organizer: Organizer, tournamentId: string) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    return this.publicTournamentsService.createShareLink(tournament);
+    const hadToken = Boolean(tournament.publicToken);
+    const result = await this.publicTournamentsService.createShareLink(tournament);
+    await this.auditService.record({
+      action: hadToken
+        ? AuditAction.PUBLIC_LINK_REGENERATED
+        : AuditAction.PUBLIC_LINK_CREATED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: tournamentId,
+      metadata: { tournamentId, organizerId: organizer.id },
+    });
+    return result;
   }
 
   async revokeShareLink(organizer: Organizer, tournamentId: string) {
     const tournament = await this.getOwnedTournament(organizer, tournamentId);
-    return this.publicTournamentsService.revokeShareLink(tournament);
+    const result = await this.publicTournamentsService.revokeShareLink(tournament);
+    await this.auditService.record({
+      action: AuditAction.PUBLIC_LINK_REVOKED,
+      userId: organizer.id,
+      entityType: AuditEntityType.TOURNAMENT,
+      entityId: tournamentId,
+      metadata: { tournamentId, organizerId: organizer.id },
+    });
+    return result;
   }
 
   async getShareLinkStatus(organizer: Organizer, tournamentId: string) {
@@ -960,4 +1061,14 @@ export class TournamentsService {
       }
     }
   }
+}
+
+function formatMatchScore(
+  teamAScore?: number | null,
+  teamBScore?: number | null,
+): string | undefined {
+  if (teamAScore == null || teamBScore == null) {
+    return undefined;
+  }
+  return `${teamAScore}-${teamBScore}`;
 }

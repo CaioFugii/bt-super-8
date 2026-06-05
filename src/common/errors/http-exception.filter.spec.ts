@@ -5,12 +5,14 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ArgumentsHost } from '@nestjs/common/interfaces';
+import { AppLoggerService } from '../../observability/app-logger.service';
 import { AppException } from './app.exception';
 import { ErrorCodes } from './error-codes';
 import { HttpExceptionFilter } from './http-exception.filter';
 
 describe('HttpExceptionFilter', () => {
-  const filter = new HttpExceptionFilter();
+  const appLogger = { logEvent: jest.fn() } as unknown as AppLoggerService;
+  const filter = new HttpExceptionFilter(appLogger);
 
   function runFilter(exception: unknown) {
     const json = jest.fn();
@@ -18,12 +20,17 @@ describe('HttpExceptionFilter', () => {
     const host = {
       switchToHttp: () => ({
         getResponse: () => ({ status }),
+        getRequest: () => ({ method: 'GET', path: '/api/test' }),
       }),
     } as unknown as ArgumentsHost;
 
     filter.catch(exception, host);
     return { status, json };
   }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
   it('returns flat AppException body', () => {
     const { status, json } = runFilter(
@@ -99,5 +106,13 @@ describe('HttpExceptionFilter', () => {
         'Ocorreu um erro inesperado. Tente novamente em alguns instantes.',
     });
     expect(json.mock.calls[0][0]).not.toHaveProperty('stack');
+    expect(appLogger.logEvent).toHaveBeenCalledWith(
+      'error',
+      'UNEXPECTED_ERROR',
+      expect.objectContaining({
+        code: ErrorCodes.UNEXPECTED_ERROR,
+        route: 'GET /api/test',
+      }),
+    );
   });
 });
