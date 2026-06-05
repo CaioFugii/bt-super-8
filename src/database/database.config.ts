@@ -10,6 +10,7 @@ import {
   Tournament,
   TournamentChallenge,
   TournamentStatusAudit,
+  AdminAuditLog,
 } from '../entities';
 
 type EnvSource = ConfigService | NodeJS.ProcessEnv;
@@ -22,6 +23,7 @@ const ENTITIES = [
   TournamentChallenge,
   RevokedPublicToken,
   TournamentStatusAudit,
+  AdminAuditLog,
 ];
 
 function readEnv(source: EnvSource, key: string, fallback?: string): string | undefined {

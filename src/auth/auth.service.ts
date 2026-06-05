@@ -7,9 +7,13 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
+import { OrganizerStatus, UserRole } from '../common/enums';
+import { AppException } from '../common/errors/app.exception';
+import { ErrorCodes } from '../common/errors/error-codes';
 import { Organizer } from '../entities';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { USER_INACTIVE_MESSAGE } from './user-inactive.constants';
 
 @Injectable()
 export class AuthService {
@@ -33,6 +37,8 @@ export class AuthService {
       email: dto.email.toLowerCase(),
       passwordHash,
       instagramHandle: dto.instagramHandle,
+      role: UserRole.ORGANIZER,
+      status: OrganizerStatus.ACTIVE,
     });
     await this.organizerRepo.save(organizer);
 
@@ -52,6 +58,14 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    if (organizer.status === OrganizerStatus.INACTIVE) {
+      throw new AppException(
+        ErrorCodes.USER_INACTIVE,
+        USER_INACTIVE_MESSAGE,
+        403,
+      );
+    }
+
     return this.buildAuthResponse(organizer);
   }
 
@@ -63,6 +77,7 @@ export class AuthService {
     const token = this.jwtService.sign({
       sub: organizer.id,
       email: organizer.email,
+      role: organizer.role,
     });
     return {
       accessToken: token,
@@ -76,6 +91,8 @@ export class AuthService {
       name: organizer.name,
       email: organizer.email,
       instagramHandle: organizer.instagramHandle,
+      role: organizer.role,
+      status: organizer.status,
       createdAt: organizer.createdAt,
       updatedAt: organizer.updatedAt,
     };

@@ -32,6 +32,24 @@ export enum ParticipantStatus {
   WITHDRAWN = 'WITHDRAWN',
 }
 
+export enum UserRole {
+  ORGANIZER = 'ORGANIZER',
+  PLATFORM_ADMIN = 'PLATFORM_ADMIN',
+}
+
+export enum OrganizerStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+}
+
+export enum AdminAuditAction {
+  CREATE_ORGANIZER = 'CREATE_ORGANIZER',
+  UPDATE_ORGANIZER = 'UPDATE_ORGANIZER',
+  ACTIVATE_ORGANIZER = 'ACTIVATE_ORGANIZER',
+  DEACTIVATE_ORGANIZER = 'DEACTIVATE_ORGANIZER',
+  RESET_PASSWORD = 'RESET_PASSWORD',
+}
+
 export enum ForfeitChallengeMode {
   RANDOM = 'RANDOM',
   CUSTOM = 'CUSTOM',

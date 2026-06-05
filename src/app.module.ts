@@ -9,6 +9,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
 import { StorageModule } from './storage/storage.module';
 import { UploadModule } from './upload/upload.module';
 import { PublicPageModule } from './public-page/public-page.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { PublicPageModule } from './public-page/public-page.module';
       useFactory: (config: ConfigService) => createTypeOrmOptions(config),
     }),
     AuthModule,
+    AdminModule,
     TournamentsModule,
     StorageModule,
     UploadModule,

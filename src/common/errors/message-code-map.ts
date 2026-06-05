@@ -47,6 +47,19 @@ const EXACT_MAP: Record<string, { code: string; message?: string }> = {
     code: ErrorCodes.UNAUTHENTICATED,
     message: 'Faça login para continuar.',
   },
+  'Já existe um organizador com este e-mail.': {
+    code: ErrorCodes.DUPLICATE_ORGANIZER_EMAIL,
+  },
+  'Organizador não encontrado.': {
+    code: ErrorCodes.ORGANIZER_NOT_FOUND,
+  },
+  'Acesso negado.': {
+    code: ErrorCodes.FORBIDDEN,
+  },
+  'Usuário inativo. Entre em contato com o administrador.': {
+    code: ErrorCodes.USER_INACTIVE,
+    message: 'Usuário inativo. Entre em contato com o administrador.',
+  },
   Unauthorized: {
     code: ErrorCodes.UNAUTHENTICATED,
     message: 'Faça login para continuar.',

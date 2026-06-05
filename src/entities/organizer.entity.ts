@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { OrganizerStatus, UserRole } from '../common/enums';
 import type { Tournament } from './tournament.entity';
 
 @Entity('organizers')
@@ -24,6 +25,20 @@ export class Organizer {
 
   @Column({ name: 'instagram_handle', nullable: true })
   instagramHandle?: string;
+
+  @Column({
+    type: 'enum',
+    enum: UserRole,
+    default: UserRole.ORGANIZER,
+  })
+  role: UserRole;
+
+  @Column({
+    type: 'enum',
+    enum: OrganizerStatus,
+    default: OrganizerStatus.ACTIVE,
+  })
+  status: OrganizerStatus;
 
   @OneToMany('Tournament', 'organizer')
   tournaments: Tournament[];
