@@ -86,12 +86,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
         const message = this.extractMessage(payload);
         if (Array.isArray(message)) {
+          const mappedDetails = message.map((item) => mapMessageToError(item).message);
+          const firstMapped = mapMessageToError(message[0] ?? 'Dados inválidos.');
           return {
             status,
             body: {
               code: ErrorCodes.VALIDATION_ERROR,
-              message: message[0] ?? 'Dados inválidos.',
-              details: message,
+              message: firstMapped.message,
+              details: mappedDetails,
             },
           };
         }
